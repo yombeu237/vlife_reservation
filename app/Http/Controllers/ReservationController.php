@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreReservationRequest;
+use App\Http\Requests\UpdateReservationRequest;
 use App\Models\Client;
 use App\Models\Compartiment;
 use App\Models\OptionReservation;
 use App\Models\Reservation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -46,32 +49,31 @@ class ReservationController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(StoreReservationRequest $request): RedirectResponse
     {
-        $data = $request->validate([
-            'client_id'         => ['required', 'exists:clients,id'],
-            'option_id'         => ['required', 'exists:options_reservation,id'],
-            'date_reservation'  => ['required', 'date', 'after_or_equal:today'],
-            'type_creneau'      => ['required', 'in:journee,plage_horaire'],
-            'heure_debut'       => ['nullable', 'required_if:type_creneau,plage_horaire', 'date_format:H:i'],
-            'heure_fin'         => ['nullable', 'required_if:type_creneau,plage_horaire', 'date_format:H:i', 'after:heure_debut'],
-            'nombre_personnes'  => ['required', 'integer', 'min:1', 'max:500'],
-            'montant'           => ['required', 'integer', 'min:0'],
-        ]);
+        $data = $request->validated();
 
-        $reservation = Reservation::create([
-            'client_id'            => $data['client_id'],
-            'utilisateur_id'       => $request->user()->id,
-            'option_id'            => $data['option_id'],
-            'date_reservation'     => $data['date_reservation'],
-            'type_creneau'         => $data['type_creneau'],
-            'heure_debut'          => $data['heure_debut'] ?? null,
-            'heure_fin'            => $data['heure_fin'] ?? null,
-            'nombre_personnes'     => $data['nombre_personnes'],
-            'montant'              => $data['montant'],
-            'statut'               => 'liste_attente',
-            'modifie_manuellement' => false,
-        ]);
+        // Une plage horaire est forcée sur un seul jour ; sinon date_fin par défaut = date de début.
+        $dateFin = $data['type_creneau'] === 'plage_horaire'
+            ? $data['date_reservation']
+            : ($data['date_fin'] ?? $data['date_reservation']);
+
+        $reservation = DB::transaction(function () use ($data, $dateFin, $request) {
+            return Reservation::create([
+                'client_id'            => $data['client_id'],
+                'utilisateur_id'       => $request->user()->id,
+                'option_id'            => $data['option_id'],
+                'date_reservation'     => $data['date_reservation'],
+                'date_fin'             => $dateFin,
+                'type_creneau'         => $data['type_creneau'],
+                'heure_debut'          => $data['heure_debut'] ?? null,
+                'heure_fin'            => $data['heure_fin'] ?? null,
+                'nombre_personnes'     => $data['nombre_personnes'],
+                'montant'              => $data['montant'],
+                'statut'               => 'liste_attente',
+                'modifie_manuellement' => false,
+            ]);
+        });
 
         return redirect()
             ->route('reservations.show', $reservation)
@@ -85,18 +87,15 @@ class ReservationController extends Controller
         return view('reservations.show', compact('reservation'));
     }
 
-    public function update(Request $request, Reservation $reservation): RedirectResponse
+    public function update(UpdateReservationRequest $request, Reservation $reservation): RedirectResponse
     {
-        $data = $request->validate([
-            'statut'  => ['nullable', 'in:liste_attente,en_cours,termine,annule'],
-            'montant' => ['nullable', 'integer', 'min:0'],
-        ]);
+        $data = $request->validated();
 
         $updates          = ['modifie_manuellement' => true];
         $messagesModifies = [];
 
         if (! empty($data['statut'])) {
-            $documentValide = ! is_null($reservation->date_validation_preuve);
+            $documentValide   = ! is_null($reservation->date_validation_preuve);
             $statutsAutorises = $documentValide
                 ? ['liste_attente', 'en_cours', 'termine', 'annule']
                 : ['liste_attente', 'annule'];
@@ -106,13 +105,13 @@ class ReservationController extends Controller
                     ->back()
                     ->withErrors([
                         'statut' => $documentValide
-                            ? "Statut non autorisé."
+                            ? 'Statut non autorisé.'
                             : "Tant que le document justificatif n'est pas validé, seuls « Liste d'attente » et « Annulé » peuvent être choisis manuellement.",
                     ]);
             }
 
-            if ($data['statut'] === 'annule' && ! $request->user()->isAdministrateur()) {
-                abort(403, 'Seul un administrateur peut annuler une réservation.');
+            if ($data['statut'] === 'annule') {
+                $this->authorize('annuler', $reservation);
             }
 
             $updates['statut']  = $data['statut'];
@@ -121,14 +120,14 @@ class ReservationController extends Controller
 
         if (array_key_exists('montant', $data) && $data['montant'] !== null) {
             $updates['montant'] = (int) $data['montant'];
-            $messagesModifies[] = "montant → " . number_format($data['montant'], 0, ',', ' ') . " FCFA";
+            $messagesModifies[] = 'montant → ' . number_format((int) $data['montant'], 0, ',', ' ') . ' FCFA';
         }
 
         if (count($updates) === 1) {
             return redirect()->back()->with('status', 'Rien à mettre à jour.');
         }
 
-        $reservation->update($updates);
+        DB::transaction(fn () => $reservation->update($updates));
 
         return redirect()
             ->back()
@@ -137,14 +136,12 @@ class ReservationController extends Controller
 
     public function destroy(Request $request, Reservation $reservation): RedirectResponse
     {
-        if (! $request->user()->isAdministrateur()) {
-            abort(403, 'Seul un administrateur peut annuler une réservation.');
-        }
+        $this->authorize('annuler', $reservation);
 
-        $reservation->update([
+        DB::transaction(fn () => $reservation->update([
             'statut'               => 'annule',
             'modifie_manuellement' => true,
-        ]);
+        ]));
 
         return redirect()
             ->route('reservations.index')
@@ -153,39 +150,41 @@ class ReservationController extends Controller
 
     public function uploadDocument(Request $request, Reservation $reservation): RedirectResponse
     {
+        $this->authorize('gererDocument', $reservation);
+
         $request->validate([
             'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
         ]);
 
-        if ($reservation->statut === 'annule') {
-            return redirect()
-                ->route('reservations.show', $reservation)
-                ->withErrors(['document' => 'Impossible de téléverser un document sur une réservation annulée.']);
+        // Verrou transactionnel : empêche deux uploads concurrents de valider le même créneau.
+        $erreur = DB::transaction(function () use ($request, $reservation) {
+            if (! $this->verifierCapacite($reservation, lock: true)) {
+                $option = $reservation->option ?? OptionReservation::find($reservation->option_id);
+
+                return ((int) $option->capacite <= 1)
+                    ? 'Ce créneau est déjà pris par une autre réservation confirmée (payée ou en cours). Impossible de téléverser une preuve : contactez le client pour proposer un autre horaire.'
+                    : "La capacité de {$option->capacite} places est atteinte pour ce créneau (réservations confirmées). Impossible de téléverser une preuve : contactez le client pour proposer un autre horaire.";
+            }
+
+            if ($reservation->chemin_document_justificatif && Storage::disk('local')->exists($reservation->chemin_document_justificatif)) {
+                Storage::disk('local')->delete($reservation->chemin_document_justificatif);
+            }
+
+            $ext  = $request->file('document')->getClientOriginalExtension();
+            $path = "documents_justificatifs/res_{$reservation->id}_" . time() . ".{$ext}";
+            Storage::disk('local')->put($path, file_get_contents($request->file('document')->getRealPath()));
+
+            $reservation->update([
+                'chemin_document_justificatif' => $path,
+                'date_validation_preuve'       => null,
+            ]);
+
+            return null;
+        });
+
+        if ($erreur !== null) {
+            return redirect()->route('reservations.show', $reservation)->withErrors(['document' => $erreur]);
         }
-
-        if (! $this->verifierCapacite($reservation)) {
-            $option = $reservation->option ?? OptionReservation::find($reservation->option_id);
-            $message = ((int) $option->capacite <= 1)
-                ? "Ce créneau est déjà pris par une autre réservation confirmée (payée ou en cours). Impossible de téléverser une preuve : contactez le client pour proposer un autre horaire."
-                : "La capacité de {$option->capacite} places est atteinte pour ce créneau (réservations confirmées). Impossible de téléverser une preuve : contactez le client pour proposer un autre horaire.";
-
-            return redirect()
-                ->route('reservations.show', $reservation)
-                ->withErrors(['document' => $message]);
-        }
-
-        if ($reservation->chemin_document_justificatif && Storage::disk('local')->exists($reservation->chemin_document_justificatif)) {
-            Storage::disk('local')->delete($reservation->chemin_document_justificatif);
-        }
-
-        $ext  = $request->file('document')->getClientOriginalExtension();
-        $path = "documents_justificatifs/res_{$reservation->id}_" . time() . ".{$ext}";
-        Storage::disk('local')->put($path, file_get_contents($request->file('document')->getRealPath()));
-
-        $reservation->update([
-            'chemin_document_justificatif' => $path,
-            'date_validation_preuve'       => null,
-        ]);
 
         return redirect()
             ->route('reservations.show', $reservation)
@@ -194,27 +193,29 @@ class ReservationController extends Controller
 
     public function validerDocument(Reservation $reservation): RedirectResponse
     {
+        $this->authorize('gererDocument', $reservation);
+
         if (! $reservation->chemin_document_justificatif) {
             return redirect()
                 ->route('reservations.show', $reservation)
                 ->with('status', 'Aucun document téléversé — validation impossible.');
         }
 
-        $capaciteOK = $this->verifierCapacite($reservation);
+        $message = DB::transaction(function () use ($reservation) {
+            $capaciteOK = $this->verifierCapacite($reservation, lock: true);
 
-        $reservation->update([
-            'date_validation_preuve' => now(),
-            'statut'                 => $capaciteOK ? 'deja_paye' : 'liste_attente',
-            'modifie_manuellement'   => false,
-        ]);
+            $reservation->update([
+                'date_validation_preuve' => now(),
+                'statut'                 => $capaciteOK ? 'deja_paye' : 'liste_attente',
+                'modifie_manuellement'   => false,
+            ]);
 
-        $message = $capaciteOK
-            ? "Document validé. Réservation #{$reservation->id} basculée en « Déjà payé »."
-            : "Document validé mais capacité insuffisante pour ce créneau. Reste en liste d'attente. Contactez le client pour proposer un autre horaire.";
+            return $capaciteOK
+                ? "Document validé. Réservation #{$reservation->id} basculée en « Déjà payé »."
+                : "Document validé mais capacité insuffisante pour ce créneau. Reste en liste d'attente. Contactez le client pour proposer un autre horaire.";
+        });
 
-        return redirect()
-            ->route('reservations.show', $reservation)
-            ->with('status', $message);
+        return redirect()->route('reservations.show', $reservation)->with('status', $message);
     }
 
     public function telechargerDocument(Reservation $reservation): StreamedResponse
@@ -228,39 +229,54 @@ class ReservationController extends Controller
         );
     }
 
-    protected function verifierCapacite(Reservation $reservation): bool
+    /**
+     * Vérifie la disponibilité du créneau en tenant compte des dates (multi-jours),
+     * des horaires (plage_horaire mono-jour) et de la capacité (exclusive vs partagée).
+     * Ne comptent que les réservations confirmées (deja_paye / en_cours).
+     *
+     * @param bool $lock  Applique un verrou SELECT ... FOR UPDATE (à utiliser dans une transaction).
+     */
+    protected function verifierCapacite(Reservation $reservation, bool $lock = false): bool
     {
         $option = $reservation->option ?? OptionReservation::find($reservation->option_id);
 
-        $autresQuiChevauchent = Reservation::query()
+        $debut = $reservation->date_reservation->toDateString();
+        $fin   = $reservation->dateFinEffective()->toDateString();
+
+        $query = Reservation::query()
             ->where('option_id', $option->id)
-            ->where('date_reservation', $reservation->date_reservation)
             ->where('id', '!=', $reservation->id)
             ->whereIn('statut', ['deja_paye', 'en_cours'])
+            // Chevauchement de plages de dates : (debutA <= finB) ET (finA >= debutB)
+            ->where('date_reservation', '<=', $fin)
+            ->whereRaw('COALESCE(date_fin, date_reservation) >= ?', [$debut])
             ->where(function ($q) use ($reservation) {
-                // Cas 1 : la réservation en cours est sur la journée entière → toute autre réservation du même jour compte
+                // Réservation à la journée (ou multi-jours) : tout chevauchement de dates compte.
                 if ($reservation->type_creneau === 'journee') {
                     return;
                 }
 
-                // Cas 2 : la réservation est sur plage horaire → on ne bloque que celles qui chevauchent
-                $q->where(function ($qq) use ($reservation) {
-                    // Une autre réservation en journee bloque toujours
-                    $qq->where('type_creneau', 'journee')
-                       ->orWhere(function ($qqq) use ($reservation) {
-                           // Deux plages se chevauchent si (debutA < finB) ET (finA > debutB)
-                           $qqq->where('type_creneau', 'plage_horaire')
-                               ->where('heure_debut', '<', $reservation->heure_fin)
-                               ->where('heure_fin', '>', $reservation->heure_debut);
-                       });
-                });
+                // Réservation sur plage horaire (mono-jour garanti) :
+                // bloquée par une réservation journée, ou par une plage qui chevauche l'horaire.
+                $q->where('type_creneau', 'journee')
+                  ->orWhere(function ($qq) use ($reservation) {
+                      $qq->where('type_creneau', 'plage_horaire')
+                         ->where('heure_debut', '<', $reservation->heure_fin)
+                         ->where('heure_fin', '>', $reservation->heure_debut);
+                  });
             });
 
-        if ((int) $option->capacite <= 1) {
-            return ! $autresQuiChevauchent->exists();
+        if ($lock) {
+            $query->lockForUpdate();
         }
 
-        $dejaOccupees = (int) $autresQuiChevauchent->sum('nombre_personnes');
+        $autres = $query->get();
+
+        if ((int) $option->capacite <= 1) {
+            return $autres->isEmpty();
+        }
+
+        $dejaOccupees = (int) $autres->sum('nombre_personnes');
 
         return ($dejaOccupees + (int) $reservation->nombre_personnes) <= (int) $option->capacite;
     }

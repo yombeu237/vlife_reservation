@@ -9,11 +9,12 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
 
             @php
-                $totalReservations = \App\Models\Reservation::count();
+                // Les réservations annulées ne sont jamais comptabilisées dans les totaux.
+                $totalReservations = \App\Models\Reservation::nonAnnulees()->count();
                 $enListeAttente    = \App\Models\Reservation::where('statut', 'liste_attente')->count();
                 $dejaPaye          = \App\Models\Reservation::where('statut', 'deja_paye')->count();
                 $enCours           = \App\Models\Reservation::where('statut', 'en_cours')->count();
-                $aujourdhui        = \App\Models\Reservation::whereDate('date_reservation', today())->count();
+                $aujourdhui        = \App\Models\Reservation::nonAnnulees()->whereDate('date_reservation', today())->count();
             @endphp
 
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

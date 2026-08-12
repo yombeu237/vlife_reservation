@@ -19,6 +19,8 @@
                           optionId: '{{ old('option_id') }}',
                           nbPersonnes: {{ (int) old('nombre_personnes', 1) }},
                           typeCreneau: '{{ old('type_creneau', 'journee') }}',
+                          dateDebut: '{{ old('date_reservation') }}',
+                          dateFin: '{{ old('date_fin') }}',
                           allOptions: {{ Illuminate\Support\Js::from(
                                 $compartiments->flatMap(fn($c) => $c->optionsReservation->map(fn($o) => [
                                     'id' => $o->id,
@@ -35,11 +37,20 @@
                           get selectedOption() {
                               return this.allOptions.find(o => String(o.id) === String(this.optionId));
                           },
+                          get nombreJours() {
+                              if (this.typeCreneau === 'plage_horaire') return 1;
+                              if (!this.dateDebut || !this.dateFin) return 1;
+                              const d1 = new Date(this.dateDebut);
+                              const d2 = new Date(this.dateFin);
+                              if (isNaN(d1) || isNaN(d2) || d2 < d1) return 1;
+                              return Math.round((d2 - d1) / 86400000) + 1;
+                          },
                           get montantEstime() {
                               if (!this.selectedOption) return 0;
                               const n = Math.max(1, parseInt(this.nbPersonnes) || 1);
-                              if (this.selectedOption.type_calcul === 'par_personne') return n * this.selectedOption.tarif;
-                              if (this.selectedOption.type_calcul === 'fixe') return this.selectedOption.tarif;
+                              const j = this.nombreJours;
+                              if (this.selectedOption.type_calcul === 'par_personne') return n * this.selectedOption.tarif * j;
+                              if (this.selectedOption.type_calcul === 'fixe') return this.selectedOption.tarif * j;
                               return 0;
                           }
                       }">
@@ -84,12 +95,18 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                            <label for="date_reservation" class="block text-sm font-medium text-[#4D4D4D] mb-1">Date</label>
-                            <input id="date_reservation" name="date_reservation" type="date" value="{{ old('date_reservation') }}" required min="{{ date('Y-m-d') }}"
+                            <label for="date_reservation" class="block text-sm font-medium text-[#4D4D4D] mb-1">Date de début</label>
+                            <input id="date_reservation" name="date_reservation" type="date" x-model="dateDebut" required min="{{ date('Y-m-d') }}"
                                    class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020]" />
                             @error('date_reservation') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+                        </div>
+                        <div x-show="typeCreneau === 'journee'" x-transition>
+                            <label for="date_fin" class="block text-sm font-medium text-[#4D4D4D] mb-1">Date de fin <span class="text-xs text-[#4D4D4D]/70 font-normal">(optionnel)</span></label>
+                            <input id="date_fin" name="date_fin" type="date" x-model="dateFin" :min="dateDebut || '{{ date('Y-m-d') }}'"
+                                   class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020]" />
+                            @error('date_fin') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
                         </div>
                         <div>
                             <label for="nombre_personnes" class="block text-sm font-medium text-[#4D4D4D] mb-1">Nombre de personnes</label>
@@ -97,6 +114,11 @@
                                    class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020]" />
                             @error('nombre_personnes') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
                         </div>
+                    </div>
+
+                    <div x-show="typeCreneau === 'journee' && nombreJours > 1" x-transition class="text-sm text-[#800020] font-medium">
+                        <svg class="inline w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/></svg>
+                        Réservation sur <span x-text="nombreJours"></span> jours.
                     </div>
 
                     <div>
@@ -133,6 +155,9 @@
                         <div>
                             <div class="text-xs text-[#4D4D4D] uppercase tracking-wider">Suggestion automatique</div>
                             <div class="text-lg font-semibold text-[#4D4D4D]" x-text="montantEstime.toLocaleString('fr-FR') + ' FCFA'"></div>
+                            <div class="text-xs text-[#4D4D4D]/70 mt-0.5" x-show="nombreJours > 1">
+                                (tarif × <span x-text="nombreJours"></span> jours)
+                            </div>
                             <button type="button" @click="$refs.montantInput.value = montantEstime"
                                     class="mt-1 text-xs text-[#800020] hover:underline">
                                 Utiliser cette suggestion

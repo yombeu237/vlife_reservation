@@ -64,7 +64,14 @@
                     </div>
                     <div>
                         <dt class="text-xs text-[#4D4D4D] uppercase">Date</dt>
-                        <dd class="text-sm text-gray-900">{{ $reservation->date_reservation?->format('d/m/Y') }}</dd>
+                        <dd class="text-sm text-gray-900">
+                            @if($reservation->estMultiJours())
+                                {{ $reservation->date_reservation?->format('d/m/Y') }} → {{ $reservation->dateFinEffective()->format('d/m/Y') }}
+                                <span class="text-xs text-[#800020] font-medium">({{ $reservation->nombreJours() }} jours)</span>
+                            @else
+                                {{ $reservation->date_reservation?->format('d/m/Y') }}
+                            @endif
+                        </dd>
                     </div>
                     <div>
                         <dt class="text-xs text-[#4D4D4D] uppercase">Créneau</dt>

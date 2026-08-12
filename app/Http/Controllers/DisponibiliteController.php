@@ -24,11 +24,15 @@ class DisponibiliteController extends Controller
                 $actives = Reservation::query()
                     ->with(['client', 'utilisateur'])
                     ->where('option_id', $option->id)
-                    ->where('date_reservation', $today)
                     ->whereIn('statut', ['deja_paye', 'en_cours'])
+                    // La réservation couvre aujourd'hui (gère le multi-jours).
+                    ->where('date_reservation', '<=', $today)
+                    ->whereRaw('COALESCE(date_fin, date_reservation) >= ?', [$today])
                     ->where(function ($q) use ($currentTime) {
+                        // Journée / multi-jours : occupe toute la journée.
                         $q->where('type_creneau', 'journee')
                           ->orWhere(function ($qq) use ($currentTime) {
+                              // Plage horaire : occupe seulement pendant son créneau.
                               $qq->where('type_creneau', 'plage_horaire')
                                  ->where('heure_debut', '<=', $currentTime)
                                  ->where('heure_fin', '>', $currentTime);

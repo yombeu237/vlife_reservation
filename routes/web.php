@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AdministrateurController;
+use App\Http\Controllers\Admin\ComptabiliteController;
 use App\Http\Controllers\Admin\EmployeController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\DisponibiliteController;
@@ -44,6 +45,8 @@ Route::prefix('admin')
 
         Route::get('administrateurs/create', [AdministrateurController::class, 'create'])->name('administrateurs.create');
         Route::post('administrateurs', [AdministrateurController::class, 'store'])->name('administrateurs.store');
+
+        Route::get('comptabilite', [ComptabiliteController::class, 'index'])->name('comptabilite.index');
     });
 
 require __DIR__.'/auth.php';

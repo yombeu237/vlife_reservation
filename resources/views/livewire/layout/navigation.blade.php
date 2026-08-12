@@ -48,6 +48,9 @@ new class extends Component
                     </x-nav-link>
 
                     @if(auth()->user()?->isAdministrateur())
+                        <x-nav-link :href="route('admin.comptabilite.index')" :active="request()->routeIs('admin.comptabilite.*')">
+                            Comptabilité
+                        </x-nav-link>
                         <x-nav-link :href="route('admin.employes.index')" :active="request()->routeIs('admin.employes.*') || request()->routeIs('admin.administrateurs.*')">
                             Employés
                         </x-nav-link>

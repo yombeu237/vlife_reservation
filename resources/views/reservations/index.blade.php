@@ -70,11 +70,16 @@
                             <tr class="hover:bg-[#F5F5F5]/50 transition-colors duration-150">
                                 <td class="px-4 py-3 text-sm"><a href="{{ route('reservations.show', $r) }}" class="text-[#800020] hover:underline font-medium">#{{ $r->id }}</a></td>
                                 <td class="px-4 py-3 text-sm text-gray-900">
-                                    {{ $r->date_reservation?->format('d/m/Y') }}
-                                    @if($r->type_creneau === 'plage_horaire')
-                                        <div class="text-xs text-[#4D4D4D]">{{ substr($r->heure_debut, 0, 5) }} → {{ substr($r->heure_fin, 0, 5) }}</div>
+                                    @if($r->estMultiJours())
+                                        {{ $r->date_reservation?->format('d/m/Y') }} → {{ $r->dateFinEffective()->format('d/m/Y') }}
+                                        <div class="text-xs text-[#800020]">{{ $r->nombreJours() }} jours</div>
                                     @else
-                                        <div class="text-xs text-[#4D4D4D] italic">Journée</div>
+                                        {{ $r->date_reservation?->format('d/m/Y') }}
+                                        @if($r->type_creneau === 'plage_horaire')
+                                            <div class="text-xs text-[#4D4D4D]">{{ substr($r->heure_debut, 0, 5) }} → {{ substr($r->heure_fin, 0, 5) }}</div>
+                                        @else
+                                            <div class="text-xs text-[#4D4D4D] italic">Journée</div>
+                                        @endif
                                     @endif
                                 </td>
                                 <td class="px-4 py-3 text-sm text-gray-900">{{ $r->client->nom }}</td>
@@ -97,9 +102,17 @@
                                                     $tempsRestant = 'Créneau terminé (bascule imminente)';
                                                 }
                                             } else {
-                                                $fin = $r->date_reservation->copy()->endOfDay();
-                                                $diff = now()->diff($fin);
-                                                $tempsRestant = 'Journée entière — fin à minuit (' . $diff->h . 'h ' . $diff->i . 'min restants)';
+                                                $fin = $r->dateFinEffective()->copy()->endOfDay();
+                                                if ($fin->isFuture()) {
+                                                    $diff = now()->diff($fin);
+                                                    if ($r->estMultiJours()) {
+                                                        $tempsRestant = 'Se termine le ' . $fin->format('d/m/Y') . ' à minuit (' . $diff->days . 'j ' . $diff->h . 'h restants)';
+                                                    } else {
+                                                        $tempsRestant = 'Journée entière — fin à minuit (' . $diff->h . 'h ' . $diff->i . 'min restants)';
+                                                    }
+                                                } else {
+                                                    $tempsRestant = 'Terminé (bascule imminente)';
+                                                }
                                             }
                                         }
                                     @endphp
