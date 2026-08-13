@@ -22,6 +22,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'modifie_manuellement',
     'chemin_document_justificatif',
     'date_validation_preuve',
+    'type_document',
+    'date_document',
+    'montant_document',
+    'numero_facture',
+    'hash_document',
 ])]
 class Reservation extends Model
 {
@@ -36,6 +41,7 @@ class Reservation extends Model
         return [
             'date_reservation'       => 'date',
             'date_fin'               => 'date',
+            'date_document'          => 'date',
             'date_validation_preuve' => 'datetime',
             'modifie_manuellement'   => 'boolean',
         ];

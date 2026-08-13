@@ -51,6 +51,9 @@ new class extends Component
                         <x-nav-link :href="route('admin.comptabilite.index')" :active="request()->routeIs('admin.comptabilite.*')">
                             Comptabilité
                         </x-nav-link>
+                        <x-nav-link :href="route('admin.rejets.index')" :active="request()->routeIs('admin.rejets.*')">
+                            Documents refusés
+                        </x-nav-link>
                         <x-nav-link :href="route('admin.employes.index')" :active="request()->routeIs('admin.employes.*') || request()->routeIs('admin.administrateurs.*')">
                             Employés
                         </x-nav-link>

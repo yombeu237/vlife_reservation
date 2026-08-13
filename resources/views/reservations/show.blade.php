@@ -100,20 +100,36 @@
                     Document justificatif
                 </h3>
 
+                <div class="mb-4 rounded-md bg-[#F5F5F5] border border-[#E0E0E0] px-4 py-3 text-sm">
+                    <div class="flex items-start gap-2 text-[#4D4D4D]">
+                        <svg class="w-4 h-4 text-[#800020] flex-shrink-0 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                        <span>Document attendu pour cette réservation ({{ $reservation->option->compartiment->nom }}) : <strong class="text-[#800020]">{{ $libelleTypeAttendu }}</strong>.</span>
+                    </div>
+                </div>
+
                 @if ($reservation->chemin_document_justificatif)
-                    <div class="flex items-center justify-between rounded-md bg-[#F5F5F5] border border-[#E0E0E0] px-4 py-3 mb-4">
-                        <div class="text-sm">
-                            <div class="text-[#4D4D4D]">Document téléversé</div>
-                            @if($reservation->date_validation_preuve)
-                                <div class="text-xs text-[#800020] mt-1">Validé le {{ $reservation->date_validation_preuve->format('d/m/Y à H:i') }}</div>
-                            @else
-                                <div class="text-xs text-[#4D4D4D]/70 mt-1 italic">En attente de validation</div>
-                            @endif
+                    <div class="rounded-md bg-[#F5F5F5] border border-[#E0E0E0] px-4 py-3 mb-4">
+                        <div class="flex items-center justify-between">
+                            <div class="text-sm">
+                                <div class="text-[#4D4D4D]">Document téléversé — <strong>{{ \App\Services\Documents\VerificateurDocument::LIBELLES[$reservation->type_document] ?? 'type inconnu' }}</strong></div>
+                                @if($reservation->date_validation_preuve)
+                                    <div class="text-xs text-[#800020] mt-1">Validé le {{ $reservation->date_validation_preuve->format('d/m/Y à H:i') }}</div>
+                                @else
+                                    <div class="text-xs text-[#4D4D4D]/70 mt-1 italic">En attente de validation</div>
+                                @endif
+                            </div>
+                            <a href="{{ route('reservations.telecharger-document', $reservation) }}" class="inline-flex items-center gap-1 text-sm text-[#800020] hover:text-[#5C0018]">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                                Télécharger
+                            </a>
                         </div>
-                        <a href="{{ route('reservations.telecharger-document', $reservation) }}" class="inline-flex items-center gap-1 text-sm text-[#800020] hover:text-[#5C0018]">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                            Télécharger
-                        </a>
+                        @if($reservation->date_document || $reservation->montant_document)
+                            <div class="mt-2 pt-2 border-t border-[#E0E0E0] text-xs text-[#4D4D4D] flex flex-wrap gap-4">
+                                <span>Date sur le document : <strong>{{ $reservation->date_document?->format('d/m/Y') ?? '—' }}</strong></span>
+                                <span>Montant : <strong>{{ $reservation->montant_document !== null ? number_format($reservation->montant_document, 0, ',', ' ') . ' FCFA' : '—' }}</strong></span>
+                                @if($reservation->numero_facture)<span>N° facture : <strong>{{ $reservation->numero_facture }}</strong></span>@endif
+                            </div>
+                        @endif
                     </div>
 
                     @if (! $reservation->date_validation_preuve && $reservation->statut !== 'annule')
@@ -128,20 +144,52 @@
                 @endif
 
                 @if ($reservation->statut !== 'annule')
-                    <form method="POST" action="{{ route('reservations.upload-document', $reservation) }}" enctype="multipart/form-data" class="mt-4">
+                    <form method="POST" action="{{ route('reservations.upload-document', $reservation) }}" enctype="multipart/form-data" class="mt-4 space-y-4">
                         @csrf
-                        <label class="block text-sm font-medium text-[#4D4D4D] mb-1">
-                            {{ $reservation->chemin_document_justificatif ? 'Remplacer le document' : 'Téléverser le document' }}
-                        </label>
-                        <div class="flex gap-2">
+                        <div>
+                            <label class="block text-sm font-medium text-[#4D4D4D] mb-1">
+                                {{ $reservation->chemin_document_justificatif ? 'Remplacer le document' : 'Téléverser le document' }}
+                            </label>
                             <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png" required
-                                   class="flex-1 text-sm text-[#4D4D4D] file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-[#800020] file:text-white file:font-medium file:cursor-pointer hover:file:bg-[#5C0018] file:transition-colors" />
-                            <button type="submit" class="rounded-md bg-[#800020] text-white px-4 py-2 text-sm font-semibold hover:bg-[#5C0018] transition-colors">
-                                Envoyer
-                            </button>
+                                   class="w-full text-sm text-[#4D4D4D] file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-[#800020] file:text-white file:font-medium file:cursor-pointer hover:file:bg-[#5C0018] file:transition-colors" />
+                            <p class="mt-1 text-xs text-[#4D4D4D]">PDF, JPG, PNG — max 5 Mo</p>
                         </div>
-                        <p class="mt-1 text-xs text-[#4D4D4D]">PDF, JPG, PNG — max 5 Mo</p>
-                        @error('document') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+
+                        <div>
+                            <label for="type_document" class="block text-sm font-medium text-[#4D4D4D] mb-1">Type de document téléversé <span class="text-xs font-normal text-[#4D4D4D]/70">(sélectionnez ce que vous voyez réellement)</span></label>
+                            <select id="type_document" name="type_document" required class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020] text-sm">
+                                <option value="">— Choisir —</option>
+                                <option value="vtc_coworking" @selected(old('type_document', $typeAttendu) === 'vtc_coworking')>Reçu vert VITECH TRAINING CENTER (VTC) — Coworking</option>
+                                <option value="facture_sportbar" @selected(old('type_document', $typeAttendu) === 'facture_sportbar')>Facture à grille (FACTURE No., boissons) — Sportbar</option>
+                            </select>
+                            @error('type_document') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                                <label for="date_document" class="block text-sm font-medium text-[#4D4D4D] mb-1">Date sur le document</label>
+                                <input type="date" id="date_document" name="date_document" value="{{ old('date_document') }}" required
+                                       class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020] text-sm" />
+                                @error('date_document') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+                            </div>
+                            <div>
+                                <label for="montant_document" class="block text-sm font-medium text-[#4D4D4D] mb-1">Montant sur le document</label>
+                                <input type="number" id="montant_document" name="montant_document" min="0" value="{{ old('montant_document') }}" required placeholder="FCFA"
+                                       class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020] text-sm" />
+                                @error('montant_document') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+                            </div>
+                            <div>
+                                <label for="numero_facture" class="block text-sm font-medium text-[#4D4D4D] mb-1">N° facture <span class="text-xs font-normal text-[#4D4D4D]/70">(si présent)</span></label>
+                                <input type="text" id="numero_facture" name="numero_facture" value="{{ old('numero_facture') }}" maxlength="50" placeholder="ex : 26"
+                                       class="block w-full rounded-md border-[#E0E0E0] shadow-sm focus:border-[#800020] focus:ring-[#800020] text-sm" />
+                                @error('numero_facture') <p class="mt-1 text-xs text-[#800020]">{{ $message }}</p> @enderror
+                            </div>
+                        </div>
+
+                        <button type="submit" class="w-full rounded-md bg-[#800020] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#5C0018] transition-colors">
+                            Vérifier et envoyer
+                        </button>
+                        <p class="text-xs text-[#4D4D4D]/70 italic">Le système vérifie que le type de document correspond au compartiment et qu'aucune facture identique (même date + montant) n'a déjà été utilisée.</p>
                     </form>
                 @endif
             </div>

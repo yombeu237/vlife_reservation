@@ -6,8 +6,10 @@ use App\Http\Requests\StoreReservationRequest;
 use App\Http\Requests\UpdateReservationRequest;
 use App\Models\Client;
 use App\Models\Compartiment;
+use App\Models\DocumentRejection;
 use App\Models\OptionReservation;
 use App\Models\Reservation;
+use App\Services\Documents\VerificateurDocument;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -80,11 +82,17 @@ class ReservationController extends Controller
             ->with('status', "Réservation #{$reservation->id} créée (statut : liste d'attente). Téléversez le document justificatif pour valider.");
     }
 
-    public function show(Reservation $reservation): View
+    public function show(Reservation $reservation, VerificateurDocument $verificateur): View
     {
         $reservation->load(['client', 'utilisateur', 'option.compartiment']);
 
-        return view('reservations.show', compact('reservation'));
+        $typeAttendu = $verificateur->typeAttendu($reservation);
+
+        return view('reservations.show', [
+            'reservation'        => $reservation,
+            'typeAttendu'        => $typeAttendu,
+            'libelleTypeAttendu' => $verificateur->libelle($typeAttendu),
+        ]);
     }
 
     public function update(UpdateReservationRequest $request, Reservation $reservation): RedirectResponse
@@ -148,16 +156,44 @@ class ReservationController extends Controller
             ->with('status', "Réservation #{$reservation->id} annulée.");
     }
 
-    public function uploadDocument(Request $request, Reservation $reservation): RedirectResponse
+    public function uploadDocument(Request $request, Reservation $reservation, VerificateurDocument $verificateur): RedirectResponse
     {
         $this->authorize('gererDocument', $reservation);
 
-        $request->validate([
-            'document' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
+        $data = $request->validate([
+            'document'         => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
+            'type_document'    => ['required', 'in:vtc_coworking,facture_sportbar'],
+            'date_document'    => ['required', 'date'],
+            'montant_document' => ['required', 'integer', 'min:0'],
+            'numero_facture'   => ['nullable', 'string', 'max:50'],
         ]);
 
-        // Verrou transactionnel : empêche deux uploads concurrents de valider le même créneau.
-        $erreur = DB::transaction(function () use ($request, $reservation) {
+        $reservation->loadMissing('option.compartiment');
+
+        $hash = hash_file('sha256', $request->file('document')->getRealPath());
+
+        // === Couche de vérification intelligente (type + anti-doublon) ===
+        $verif = $verificateur->verifier(
+            $reservation,
+            $data['type_document'],
+            $data['date_document'],
+            (int) $data['montant_document'],
+            $data['numero_facture'] ?? null,
+            $hash,
+        );
+
+        if (! $verif['ok']) {
+            $this->enregistrerRejet($request, $reservation, $verificateur, $data, $verif);
+
+            $alerte = $this->messageAlerteSiSeuilAtteint($request->user());
+
+            return redirect()
+                ->route('reservations.show', $reservation)
+                ->withErrors(['document' => $verif['raison'] . ($alerte ? ' ' . $alerte : '')]);
+        }
+
+        // === Vérification de capacité (verrou transactionnel anti-concurrence) ===
+        $erreur = DB::transaction(function () use ($request, $reservation, $data, $hash) {
             if (! $this->verifierCapacite($reservation, lock: true)) {
                 $option = $reservation->option ?? OptionReservation::find($reservation->option_id);
 
@@ -177,6 +213,11 @@ class ReservationController extends Controller
             $reservation->update([
                 'chemin_document_justificatif' => $path,
                 'date_validation_preuve'       => null,
+                'type_document'                => $data['type_document'],
+                'date_document'                => $data['date_document'],
+                'montant_document'             => (int) $data['montant_document'],
+                'numero_facture'               => $data['numero_facture'] ?? null,
+                'hash_document'                => $hash,
             ]);
 
             return null;
@@ -188,7 +229,41 @@ class ReservationController extends Controller
 
         return redirect()
             ->route('reservations.show', $reservation)
-            ->with('status', 'Document téléversé. Il doit maintenant être validé pour faire passer la réservation en « Déjà payé ».');
+            ->with('status', 'Document vérifié et téléversé (type et unicité contrôlés). Il doit maintenant être validé pour faire passer la réservation en « Déjà payé ».');
+    }
+
+    /** Trace un rejet de document dans document_rejections. */
+    protected function enregistrerRejet(Request $request, Reservation $reservation, VerificateurDocument $verificateur, array $data, array $verif): void
+    {
+        DocumentRejection::create([
+            'utilisateur_id'   => $request->user()->id,
+            'reservation_id'   => $reservation->id,
+            'type_attendu'     => $verificateur->typeAttendu($reservation),
+            'type_fourni'      => $data['type_document'],
+            'code_raison'      => $verif['code'],
+            'raison'           => $verif['raison'],
+            'date_document'    => $data['date_document'],
+            'montant_document' => (int) $data['montant_document'],
+            'numero_facture'   => $data['numero_facture'] ?? null,
+        ]);
+    }
+
+    /** Retourne un message d'alerte si un EMPLOYÉ cumule >= 2 rejets sur 7 jours (les admins ne sont pas surveillés). */
+    protected function messageAlerteSiSeuilAtteint(\App\Models\User $user): ?string
+    {
+        if ($user->isAdministrateur()) {
+            return null;
+        }
+
+        $nb = DocumentRejection::where('utilisateur_id', $user->id)
+            ->where('created_at', '>=', now()->subDays(7))
+            ->count();
+
+        if ($nb >= 2) {
+            return "Attention : {$nb} documents refusés sur les 7 derniers jours pour votre compte. Un administrateur en a été informé.";
+        }
+
+        return null;
     }
 
     public function validerDocument(Reservation $reservation): RedirectResponse

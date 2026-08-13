@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AdministrateurController;
 use App\Http\Controllers\Admin\ComptabiliteController;
 use App\Http\Controllers\Admin\EmployeController;
+use App\Http\Controllers\Admin\RejetDocumentController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\DisponibiliteController;
 use App\Http\Controllers\ReservationController;
@@ -47,6 +48,8 @@ Route::prefix('admin')
         Route::post('administrateurs', [AdministrateurController::class, 'store'])->name('administrateurs.store');
 
         Route::get('comptabilite', [ComptabiliteController::class, 'index'])->name('comptabilite.index');
+
+        Route::get('rejets-documents', [RejetDocumentController::class, 'index'])->name('rejets.index');
     });
 
 require __DIR__.'/auth.php';

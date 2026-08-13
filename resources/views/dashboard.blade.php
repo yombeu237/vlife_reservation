@@ -8,6 +8,26 @@
     <div class="py-8">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
 
+            @if(auth()->user()->isAdministrateur())
+                @php
+                    $employesRejets = \App\Models\DocumentRejection::query()
+                        ->where('created_at', '>=', now()->subDays(7))
+                        ->whereHas('utilisateur', fn($q) => $q->where('role', 'employe'))
+                        ->selectRaw('utilisateur_id, COUNT(*) as nb')
+                        ->groupBy('utilisateur_id')
+                        ->having('nb', '>=', 2)
+                        ->count();
+                @endphp
+                @if($employesRejets > 0)
+                    <a href="{{ route('admin.rejets.index') }}" class="block mb-6 rounded-md bg-[#800020] text-white px-4 py-3 hover:bg-[#5C0018] transition-colors">
+                        <div class="flex items-center gap-3">
+                            <svg class="w-5 h-5 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                            <span class="text-sm font-medium">{{ $employesRejets }} employé(s) avec ≥ 2 documents refusés sur 7 jours — cliquez pour examiner.</span>
+                        </div>
+                    </a>
+                @endif
+            @endif
+
             @php
                 // Les réservations annulées ne sont jamais comptabilisées dans les totaux.
                 $totalReservations = \App\Models\Reservation::nonAnnulees()->count();
